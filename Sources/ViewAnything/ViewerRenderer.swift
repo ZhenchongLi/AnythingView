@@ -26,6 +26,9 @@ enum RendererFactory {
         if ImageRenderer.supportedExtensions.contains(ext) {
             return ImageRenderer()
         }
+        if QuickLookRenderer.supportedExtensions.contains(ext) {
+            return QuickLookRenderer()
+        }
         // Default: web renderer handles everything else
         return WebRenderer()
     }
@@ -33,6 +36,7 @@ enum RendererFactory {
     static var allSupportedExtensions: Set<String> {
         PDFRenderer.supportedExtensions
             .union(ImageRenderer.supportedExtensions)
+            .union(QuickLookRenderer.supportedExtensions)
             .union(WebRenderer.supportedExtensions)
     }
 }
