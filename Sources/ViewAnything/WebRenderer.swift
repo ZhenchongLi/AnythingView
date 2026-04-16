@@ -476,6 +476,28 @@ class WebRenderer: NSObject, ViewerRenderer, WKNavigationDelegate {
 
     // MARK: - Code File
 
+    private static let langMap: [String: String] = [
+        "swift": "swift", "cs": "csharp", "py": "python", "js": "javascript",
+        "ts": "typescript", "tsx": "typescript", "jsx": "javascript",
+        "go": "go", "rs": "rust", "rb": "ruby", "java": "java",
+        "kt": "kotlin", "scala": "scala", "c": "c", "h": "c",
+        "cpp": "cpp", "hpp": "cpp", "m": "objectivec", "mm": "objectivec",
+        "lua": "lua", "r": "r", "pl": "perl", "php": "php", "dart": "dart",
+        "zig": "zig", "nim": "nim", "ex": "elixir", "exs": "elixir",
+        "erl": "erlang", "hs": "haskell", "ml": "ocaml", "fs": "fsharp",
+        "asm": "x86asm", "s": "x86asm", "sql": "sql",
+        "sh": "bash", "bash": "bash", "zsh": "bash", "fish": "shell",
+        "bat": "dos", "ps1": "powershell", "cmd": "dos",
+        "xml": "xml", "json": "json", "yaml": "yaml", "yml": "yaml",
+        "toml": "ini", "ini": "ini", "cfg": "ini", "conf": "ini",
+        "plist": "xml", "graphql": "graphql", "proto": "protobuf",
+        "css": "css", "scss": "scss", "sass": "scss", "less": "less",
+        "svg": "xml", "rst": "plaintext", "txt": "plaintext",
+        "log": "plaintext", "diff": "diff", "patch": "diff",
+        "makefile": "makefile", "cmake": "cmake",
+        "html": "html", "htm": "html",
+    ]
+
     private func loadCodeFile(_ filePath: String) {
         guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else {
             showError("Failed to read file")
@@ -488,10 +510,16 @@ class WebRenderer: NSObject, ViewerRenderer, WKNavigationDelegate {
             .replacingOccurrences(of: ">", with: "&gt;")
 
         let lineCount = content.components(separatedBy: "\n").count
+        let ext = URL(fileURLWithPath: filePath).pathExtension.lowercased()
+        let lang = Self.langMap[ext] ?? ""
+        let langClass = lang.isEmpty ? "" : "language-\(lang)"
         let escapedFilename = URL(fileURLWithPath: filePath).lastPathComponent
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+
+        let highlightInline = Self.highlightScript.isEmpty ? "" : "<script>\(Self.highlightScript)</script>"
+
         let html = """
         <!DOCTYPE html>
         <html>
@@ -504,17 +532,44 @@ class WebRenderer: NSObject, ViewerRenderer, WKNavigationDelegate {
                    background: #f8f9fa; color: #1a1a1a; }
             pre { margin: 0; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word;
                   tab-size: 4; }
+            pre code { font-family: inherit; font-size: inherit; }
             .header { color: #888; font-size: 11px; margin-bottom: 12px; padding-bottom: 8px;
                       border-bottom: 1px solid #ddd; }
+            .hljs{display:block;overflow-x:auto;padding:0;color:#333;background:transparent;}
+            .hljs-comment,.hljs-quote{color:#998;font-style:italic;}
+            .hljs-keyword,.hljs-selector-tag,.hljs-subst{color:#333;font-weight:bold;}
+            .hljs-number,.hljs-literal,.hljs-variable,.hljs-template-variable,.hljs-tag .hljs-attr{color:#008080;}
+            .hljs-string,.hljs-doctag{color:#d14;}
+            .hljs-title,.hljs-section,.hljs-selector-id{color:#900;font-weight:bold;}
+            .hljs-subst{font-weight:normal;}
+            .hljs-type,.hljs-class .hljs-title{color:#458;font-weight:bold;}
+            .hljs-tag,.hljs-name,.hljs-attribute{color:#000080;font-weight:normal;}
+            .hljs-regexp,.hljs-link{color:#009926;}
+            .hljs-symbol,.hljs-bullet{color:#990073;}
+            .hljs-built_in,.hljs-builtin-name{color:#0086b3;}
+            .hljs-meta{color:#999;font-weight:bold;}
+            .hljs-deletion{background:#fdd;}.hljs-addition{background:#dfd;}
             @media (prefers-color-scheme: dark) {
                 body { background: #1e1e1e; color: #d4d4d4; }
                 .header { border-bottom-color: #333; }
+                .hljs{color:#abb2bf;background:transparent;}
+                .hljs-comment,.hljs-quote{color:#5c6370;font-style:italic;}
+                .hljs-doctag,.hljs-keyword,.hljs-formula{color:#c678dd;}
+                .hljs-section,.hljs-name,.hljs-selector-tag,.hljs-deletion,.hljs-subst{color:#e06c75;}
+                .hljs-literal{color:#56b6c2;}
+                .hljs-string,.hljs-regexp,.hljs-addition,.hljs-attribute,.hljs-meta-string{color:#98c379;}
+                .hljs-built_in,.hljs-class .hljs-title{color:#e6c07b;}
+                .hljs-attr,.hljs-variable,.hljs-template-variable,.hljs-type,.hljs-selector-class,
+                .hljs-selector-attr,.hljs-selector-pseudo,.hljs-number{color:#d19a66;}
+                .hljs-symbol,.hljs-bullet,.hljs-link,.hljs-meta,.hljs-selector-id,.hljs-title{color:#61aeee;}
             }
         </style>
+        \(highlightInline)
         </head>
         <body>
         <div class="header">\(lineCount) lines · \(escapedFilename)</div>
-        <pre>\(escaped)</pre>
+        <pre><code class="\(langClass)">\(escaped)</code></pre>
+        <script>if(window.hljs){hljs.highlightAll();}</script>
         </body>
         </html>
         """
