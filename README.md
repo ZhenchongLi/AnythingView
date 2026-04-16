@@ -4,6 +4,11 @@ macOS native document viewer. View anything, locally, fast, faithful.
 
 No Office, no Electron, no cloud. Just drop a file and see it.
 
+| Light | Dark |
+|-------|------|
+| ![Code - Light](screenshots/code-swift.png) | ![Code - Dark](screenshots/code-dark.png) |
+| ![Markdown](screenshots/markdown.png) | |
+
 ## Supported Formats
 
 | Category | Formats | Engine |
