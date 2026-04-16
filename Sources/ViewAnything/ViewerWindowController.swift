@@ -366,7 +366,13 @@ class ViewerWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate, WKN
 
     private func loadPdfFile() {
         guard let document = PDFDocument(url: URL(fileURLWithPath: filePath)) else {
-            // Fall back to error in a web view if PDF can't be loaded
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Error"
+                alert.informativeText = "Failed to load PDF: \(self.filePath)"
+                alert.alertStyle = .critical
+                alert.runModal()
+            }
             return
         }
         DispatchQueue.main.async { [weak self] in
