@@ -95,7 +95,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let resolved = (path as NSString).standardizingPath
         let url = URL(fileURLWithPath: resolved)
         let ext = url.pathExtension.lowercased()
-        guard ViewerWindowController.supportedExtensions.contains(ext) else {
+        guard RendererFactory.allSupportedExtensions.contains(ext) else {
             showError("Unsupported file type: .\(ext)")
             return
         }
@@ -121,7 +121,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         var types: [UTType] = []
-        for ext in ViewerWindowController.supportedExtensions {
+        for ext in RendererFactory.allSupportedExtensions {
             if let t = UTType(filenameExtension: ext) { types.append(t) }
         }
         panel.allowedContentTypes = types.isEmpty ? [.data] : types

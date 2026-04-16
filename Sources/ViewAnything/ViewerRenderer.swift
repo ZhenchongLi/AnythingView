@@ -1,0 +1,34 @@
+import Cocoa
+
+/// Pluggable rendering backend for ViewAnything.
+/// Each renderer owns its NSView and knows how to load/reload a specific set of file types.
+protocol ViewerRenderer: AnyObject {
+    /// The view to embed in the window.
+    var view: NSView { get }
+
+    /// File extensions this renderer handles.
+    static var supportedExtensions: Set<String> { get }
+
+    /// Load the file at the given path.
+    func load(filePath: String)
+
+    /// Set the zoom level (1.0 = 100%).
+    func setZoom(_ level: CGFloat)
+}
+
+/// Returns the appropriate renderer for a file extension.
+enum RendererFactory {
+    static func renderer(for extension: String) -> ViewerRenderer {
+        let ext = `extension`.lowercased()
+        if PDFRenderer.supportedExtensions.contains(ext) {
+            return PDFRenderer()
+        }
+        // Default: web renderer handles everything else
+        return WebRenderer()
+    }
+
+    static var allSupportedExtensions: Set<String> {
+        PDFRenderer.supportedExtensions
+            .union(WebRenderer.supportedExtensions)
+    }
+}
