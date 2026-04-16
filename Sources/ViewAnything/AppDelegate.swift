@@ -110,6 +110,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         controller.onClose = { [weak self] ctrl in
             self?.windows.removeAll { $0 === ctrl }
         }
+        controller.onOpenFiles = { [weak self] paths in
+            for path in paths {
+                self?.openDocument(at: path)
+            }
+        }
         windows.append(controller)
         controller.showWindow(nil)
     }

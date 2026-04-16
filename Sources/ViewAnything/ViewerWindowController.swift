@@ -17,6 +17,7 @@ class ViewerWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     let filePath: String
     var onClose: ((ViewerWindowController) -> Void)?
+    var onOpenFiles: (([String]) -> Void)?
 
     private(set) var window: NSWindow?
     private var renderer: ViewerRenderer?
@@ -59,7 +60,16 @@ class ViewerWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
         let r = RendererFactory.renderer(for: fileExtension)
         self.renderer = r
-        win.contentView = r.view
+
+        let dropTarget = DropTargetView(frame: win.contentView?.bounds ?? .zero)
+        dropTarget.autoresizingMask = [.width, .height]
+        dropTarget.onDrop = { [weak self] paths in
+            self?.onOpenFiles?(paths)
+        }
+        r.view.frame = dropTarget.bounds
+        r.view.autoresizingMask = [.width, .height]
+        dropTarget.addSubview(r.view)
+        win.contentView = dropTarget
 
         let toolbar = NSToolbar(identifier: "ViewAnythingToolbar")
         toolbar.delegate = self
