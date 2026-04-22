@@ -1,5 +1,5 @@
 [package]
-name = "anythingview"
+name = "anyview"
 version = "0.1.0"
 edition = "2021"
 description = "Native Linux document viewer"

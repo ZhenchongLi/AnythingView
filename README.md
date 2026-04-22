@@ -1,4 +1,4 @@
-# AnythingView
+# AnyView
 
 macOS native document viewer. View anything, locally, fast, faithful.
 

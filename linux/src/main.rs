@@ -12,7 +12,7 @@ mod window;
 use adw::prelude::*;
 use gio::ApplicationFlags;
 
-const APP_ID: &str = "com.anythingview.linux";
+const APP_ID: &str = "com.anyview.linux";
 
 fn main() -> glib::ExitCode {
     let application = adw::Application::builder()

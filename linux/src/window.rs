@@ -23,7 +23,7 @@ impl ViewerWindow {
         let filename = path
             .file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or("AnythingView")
+            .unwrap_or("AnyView")
             .to_string();
 
         let window = adw::ApplicationWindow::builder()

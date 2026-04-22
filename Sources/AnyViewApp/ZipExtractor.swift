@@ -5,7 +5,7 @@ enum ZipExtractor {
     /// Extract the zip file at `zipPath` to a new temporary directory.
     /// Returns the path to the temp directory.
     static func extract(zipPath: String) throws -> String {
-        let tempDir = NSTemporaryDirectory() + "AnythingView-" + UUID().uuidString
+        let tempDir = NSTemporaryDirectory() + "AnyView-" + UUID().uuidString
         try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
 
         let process = Process()

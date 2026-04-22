@@ -1,6 +1,6 @@
 import Cocoa
 
-/// Pluggable rendering backend for AnythingView.
+/// Pluggable rendering backend for AnyView.
 /// Each renderer owns its NSView and knows how to load/reload a specific set of file types.
 protocol ViewerRenderer: AnyObject {
     /// The view to embed in the window.

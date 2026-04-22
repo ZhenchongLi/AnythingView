@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build AnythingView.app bundle from the SPM executable
+# Build AnyView.app bundle from the SPM executable
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -8,15 +8,15 @@ cd "$SCRIPT_DIR"
 CONFIG="${1:-release}"
 if [ "$CONFIG" = "release" ]; then
     swift build -c release
-    EXECUTABLE=".build/release/AnythingView"
+    EXECUTABLE=".build/release/AnyView"
     BUILD_DIR=".build/release"
 else
     swift build
-    EXECUTABLE=".build/debug/AnythingView"
+    EXECUTABLE=".build/debug/AnyView"
     BUILD_DIR=".build/debug"
 fi
 
-APP_DIR="$SCRIPT_DIR/.build/AnythingView.app"
+APP_DIR="$SCRIPT_DIR/.build/AnyView.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 
@@ -27,10 +27,10 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS"
 
 # Copy executable
-cp "$EXECUTABLE" "$MACOS/AnythingView"
+cp "$EXECUTABLE" "$MACOS/AnyView"
 
 # Copy Info.plist
-cp "$SCRIPT_DIR/Sources/AnythingView/Info.plist" "$CONTENTS/Info.plist"
+cp "$SCRIPT_DIR/Sources/AnyViewApp/Info.plist" "$CONTENTS/Info.plist"
 
 # Copy icon
 RESOURCES="$CONTENTS/Resources"

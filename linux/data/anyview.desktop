@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=AnythingView
+Name=AnyView
 GenericName=Document Viewer
 Comment=View anything, locally, fast, faithful
-Exec=anythingview %F
-Icon=anythingview
+Exec=anyview %F
+Icon=anyview
 Terminal=false
 Categories=Office;Viewer;Graphics;AudioVideo;
 StartupNotify=true

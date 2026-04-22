@@ -1,9 +1,9 @@
-# AnythingView 文件类型覆盖扩展 — 设计稿
+# AnyView 文件类型覆盖扩展 — 设计稿
 
 **作者**：Joe（owner）
 **实现**：Weaver
 **日期**：2026-04-18
-**目标**：把 AnythingView 能看的文件类型尽可能扩广，朝"任何文件丢进来都能看"靠拢。
+**目标**：把 AnyView 能看的文件类型尽可能扩广，朝"任何文件丢进来都能看"靠拢。
 
 ## 现在的状态
 
@@ -48,7 +48,7 @@
 
 ### 验收标准
 
-- 每个加的格式：找一个真实样本文件，确认在 AnythingView 里能打开、能看到内容（不是空白窗口或错误）
+- 每个加的格式：找一个真实样本文件，确认在 AnyView 里能打开、能看到内容（不是空白窗口或错误）
 - 不能预览的从清单里移掉，不留半成品
 
 ---
@@ -94,7 +94,7 @@
 ### 验收标准
 
 - 每个：renderer 类自带 unit test（输入文件路径 → 渲染产物的某种快照）
-- README 里加一行"现在 AnythingView 也能看 X"
+- README 里加一行"现在 AnyView 也能看 X"
 
 ---
 
@@ -113,7 +113,7 @@
 
 ## 推荐执行顺序
 
-1. **本周内**：Weaver 跑 Phase 1，把 8 类约 30 个扩展名补上，AnythingView 一夜之间能多看一倍格式
+1. **本周内**：Weaver 跑 Phase 1，把 8 类约 30 个扩展名补上，AnyView 一夜之间能多看一倍格式
 2. **下周开始**：Phase 2 第 1 项（ipynb），最有用户感知
 3. **Phase 1 + Phase 2 第 1 项稳定后**：再决定 Phase 3 的第一个目标
 
@@ -123,7 +123,7 @@
 
 ## 谁做什么
 
-- **Joe（我）**：本设计稿；Phase 1 完成后写一篇博客，介绍 AnythingView 新覆盖范围；Phase 2 每个新格式上线前再加补充设计稿
+- **Joe（我）**：本设计稿；Phase 1 完成后写一篇博客，介绍 AnyView 新覆盖范围；Phase 2 每个新格式上线前再加补充设计稿
 - **Weaver**：实现 Phase 1（Info.plist + QuickLookRenderer 扩展）；评估 Phase 2 各项的具体实现路径，给出"能做 / 多久"表格
 - **lizcc**：批准 Phase 1 启动；Phase 2 选第一项前 review 一下"用户需要哪个格式最强"
 
@@ -131,4 +131,4 @@
 
 1. Phase 1 里 macOS QuickLook 的预览质量我没逐个验证过——可能有些格式实际打开是空白或卡顿。Weaver 实现时遇到 quality 问题可以缩小清单。
 2. 视频/音频是否需要"全功能播放"还是只做静态预览？现在偏向只做 QuickLook 的内嵌播放，不自己写控件。
-3. EPUB / Jupyter 这类多页文档是否需要导航条？现在 AnythingView 没有"翻页/目录"概念，可能需要扩 ViewerRenderer protocol。
+3. EPUB / Jupyter 这类多页文档是否需要导航条？现在 AnyView 没有"翻页/目录"概念，可能需要扩 ViewerRenderer protocol。

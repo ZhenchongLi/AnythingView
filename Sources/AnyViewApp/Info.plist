@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>AnythingView</string>
+    <string>AnyView</string>
     <key>CFBundleDisplayName</key>
-    <string>AnythingView</string>
+    <string>AnyView</string>
     <key>CFBundleIdentifier</key>
-    <string>com.anythingview.app</string>
+    <string>com.anyview.app</string>
     <key>CFBundleVersion</key>
     <string>0.1</string>
     <key>CFBundleShortVersionString</key>
@@ -15,7 +15,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>AnythingView</string>
+    <string>AnyView</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
