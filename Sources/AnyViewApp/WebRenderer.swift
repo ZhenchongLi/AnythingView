@@ -611,7 +611,7 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
 
             let task = Process()
             task.executableURL = URL(fileURLWithPath: tectonic)
-            task.arguments = ["--outdir", tmpDir, filePath]
+            task.arguments = ["-Z", "continue-on-errors", "--outdir", tmpDir, filePath]
             let pipe = Pipe()
             task.standardOutput = pipe
             task.standardError = pipe
@@ -629,7 +629,7 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
             let baseName = URL(fileURLWithPath: filePath).deletingPathExtension().lastPathComponent
             let pdfPath = (tmpDir as NSString).appendingPathComponent("\(baseName).pdf")
 
-            if task.terminationStatus == 0, FileManager.default.fileExists(atPath: pdfPath) {
+            if FileManager.default.fileExists(atPath: pdfPath) {
                 self.tempDir = tmpDir
                 let pdfURL = URL(fileURLWithPath: pdfPath)
                 let pdfName = pdfURL.lastPathComponent
