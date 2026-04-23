@@ -579,6 +579,15 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
             """
         }
 
+        // Subfile check — skip compilation if no \begin{document}
+        guard source.contains("\\begin{document}") else {
+            let html = makeSourceHtml(statusMsg: "Subfile (no \\begin{document}) — source only", isError: false)
+            DispatchQueue.main.async { [weak self] in
+                self?.webView.loadHTMLString(html, baseURL: URL(fileURLWithPath: filePath))
+            }
+            return
+        }
+
         // Show source + "Compiling…" immediately
         let compilingHtml = makeSourceHtml(statusMsg: "Compiling…", isError: false)
         DispatchQueue.main.async { [weak self] in
