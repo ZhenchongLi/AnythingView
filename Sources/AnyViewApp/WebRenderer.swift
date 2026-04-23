@@ -1290,38 +1290,47 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         <div id="status">加载中…</div>
         <div id="container"></div>
         <script>
-        (function() {
+        (async function() {
             var status = document.getElementById('status');
             var container = document.getElementById('container');
             var b64 = "\(base64)";
+            var bin = atob(b64);
+            var bytes = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            var MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+            var opts = {
+                className: 'docx', inWrapper: true, breakPages: true,
+                ignoreLastRenderedPageBreak: true, experimental: true,
+                trimXmlDeclaration: true, renderHeaders: true, renderFooters: true,
+                renderFootnotes: true, renderEndnotes: true,
+                renderComments: true, renderChanges: true,
+            };
             try {
-                var bin = atob(b64);
-                var len = bin.length;
-                var bytes = new Uint8Array(len);
-                for (var i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-                var blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-                docx.renderAsync(blob, container, null, {
-                    className: 'docx',
-                    inWrapper: true,
-                    breakPages: true,
-                    ignoreLastRenderedPageBreak: true,
-                    experimental: true,
-                    trimXmlDeclaration: true,
-                    renderHeaders: true,
-                    renderFooters: true,
-                    renderFootnotes: true,
-                    renderEndnotes: true,
-                    renderComments: true,
-                    renderChanges: true,
-                }).then(function() {
-                    status.textContent = '';
-                }).catch(function(e) {
+                await docx.renderAsync(new Blob([bytes], { type: MIME }), container, null, opts);
+                status.textContent = '';
+            } catch (e1) {
+                // Retry after stripping OMML math (common pandoc-generated docx issue)
+                try {
+                    status.textContent = '正在处理数学公式…';
+                    var zip = await JSZip.loadAsync(bytes);
+                    var docFile = zip.file('word/document.xml');
+                    if (!docFile) throw e1;
+                    var xml = await docFile.async('string');
+                    var cleaned = xml
+                        .replace(/<m:oMathPara\\b[^>]*>[\\s\\S]*?<\\/m:oMathPara>/g,
+                                 '<w:p><w:r><w:t>[公式]</w:t></w:r></w:p>')
+                        .replace(/<m:oMath\\b[^>]*>[\\s\\S]*?<\\/m:oMath>/g,
+                                 '<w:r><w:t>[公式]</w:t></w:r>');
+                    zip.file('word/document.xml', cleaned);
+                    var newBytes = await zip.generateAsync({ type: 'uint8array' });
+                    container.innerHTML = '';
+                    await docx.renderAsync(new Blob([newBytes], { type: MIME }), container, null, opts);
+                    status.textContent = '数学公式已转为占位符';
+                    setTimeout(function() { status.textContent = ''; }, 3000);
+                } catch (e2) {
                     status.className = 'error';
-                    status.textContent = '渲染失败: ' + (e && e.message ? e.message : e);
-                });
-            } catch (e) {
-                status.className = 'error';
-                status.textContent = '加载失败: ' + (e && e.message ? e.message : e);
+                    status.textContent = '渲染失败: ' + (e2 && e2.message ? e2.message : e2);
+                }
             }
         })();
         </script>
