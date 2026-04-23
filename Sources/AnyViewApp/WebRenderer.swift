@@ -1282,6 +1282,19 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
                       backdrop-filter: blur(8px); }
             #status:empty { display: none; }
             #status.error { background: #b91c1c; }
+            /* Map Windows CJK fonts to macOS equivalents */
+            @font-face { font-family: '宋体'; src: local('STSong-Light'), local('STSong'); }
+            @font-face { font-family: 'SimSun'; src: local('STSong-Light'), local('STSong'); }
+            @font-face { font-family: '微软雅黑'; src: local('PingFang SC'); }
+            @font-face { font-family: 'Microsoft YaHei'; src: local('PingFang SC'); }
+            @font-face { font-family: '黑体'; src: local('STHeiti'); }
+            @font-face { font-family: 'SimHei'; src: local('STHeiti'); }
+            @font-face { font-family: '楷体'; src: local('STKaiti'); }
+            @font-face { font-family: 'KaiTi'; src: local('STKaiti'); }
+            @font-face { font-family: '仿宋'; src: local('STFangsong'); }
+            @font-face { font-family: 'FangSong'; src: local('STFangsong'); }
+            @font-face { font-family: '等线'; src: local('PingFang SC'); }
+            @font-face { font-family: 'DengXian'; src: local('PingFang SC'); }
         </style>
         <script>\(Self.jszipScript)</script>
         <script>\(Self.docxPreviewScript)</script>
