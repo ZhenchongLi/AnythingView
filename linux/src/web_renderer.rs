@@ -8,6 +8,7 @@ use pulldown_cmark::{html as cmark_html, Options, Parser};
 use crate::renderer::Renderer;
 
 const HIGHLIGHT_JS: &str = include_str!("../resources/highlight.min.js");
+const HLJS_LATEX_JS: &str = include_str!("../resources/hljs-latex.js");
 const MERMAID_JS: &str = include_str!("../resources/mermaid.min.js");
 const JSZIP_JS: &str = include_str!("../resources/jszip.min.js");
 const DOCX_PREVIEW_JS: &str = include_str!("../resources/docx-preview.js");
@@ -424,12 +425,14 @@ body{{background:#1e1e1e;color:#d4d4d4;}}
 }}
 </style>
 <script>{hljs}</script>
+<script>{hljs_latex}</script>
 </head><body>
 {status}
 <pre><code class="language-latex">{source}</code></pre>
 <script>if(window.hljs){{hljs.highlightAll();}}</script>
 </body></html>"#,
             hljs = HIGHLIGHT_JS,
+            hljs_latex = HLJS_LATEX_JS,
             status = status_html,
             source = escaped_source,
         )
@@ -468,6 +471,7 @@ body{{background:#1a1a1a;}}
 }}
 </style>
 <script>{hljs}</script>
+<script>{hljs_latex}</script>
 </head><body>
 <button class="toggle-btn" onclick="toggle()">&lt;/&gt; Source</button>
 <iframe id="preview" src="{pdf}"></iframe>
@@ -484,6 +488,7 @@ else{{s.style.display='none';p.style.display='block';btn.innerHTML='&lt;/&gt; So
 </script>
 </body></html>"#,
             hljs = HIGHLIGHT_JS,
+            hljs_latex = HLJS_LATEX_JS,
             pdf = pdf_uri,
             source = escaped_source,
         )
@@ -588,6 +593,20 @@ else{{s.style.display='none';p.style.display='block';btn.innerHTML='&lt;/&gt; So
   }}
   .status {{ font-family: system-ui, sans-serif; padding: 40px; color: #333; text-align: center; }}
   .status.err {{ color: #c00; }}
+  @font-face {{ font-family: '宋体'; font-weight: normal; src: local('STSong-Light'), local('STSong'); }}
+  @font-face {{ font-family: '宋体'; font-weight: bold; src: local('STSong'); }}
+  @font-face {{ font-family: 'SimSun'; font-weight: normal; src: local('STSong-Light'), local('STSong'); }}
+  @font-face {{ font-family: 'SimSun'; font-weight: bold; src: local('STSong'); }}
+  @font-face {{ font-family: '微软雅黑'; font-weight: normal; src: local('WenQuanYi Micro Hei'), local('Noto Sans CJK SC'), local('PingFang SC'); }}
+  @font-face {{ font-family: '微软雅黑'; font-weight: bold; src: local('WenQuanYi Micro Hei'), local('Noto Sans CJK SC Bold'), local('PingFang SC Semibold'); }}
+  @font-face {{ font-family: 'Microsoft YaHei'; font-weight: normal; src: local('WenQuanYi Micro Hei'), local('Noto Sans CJK SC'); }}
+  @font-face {{ font-family: '黑体'; font-weight: normal; src: local('WenQuanYi Zen Hei'), local('Noto Sans CJK SC'), local('STHeiti'); }}
+  @font-face {{ font-family: 'SimHei'; font-weight: normal; src: local('WenQuanYi Zen Hei'), local('Noto Sans CJK SC'); }}
+  @font-face {{ font-family: '楷体'; src: local('AR PL UKai CN'), local('STKaiti'); }}
+  @font-face {{ font-family: 'KaiTi'; src: local('AR PL UKai CN'), local('STKaiti'); }}
+  @font-face {{ font-family: '仿宋'; src: local('STFangsong'); }}
+  @font-face {{ font-family: 'FangSong'; src: local('STFangsong'); }}
+  @font-face {{ font-family: '等线'; src: local('Noto Sans CJK SC'), local('WenQuanYi Micro Hei'); }}
 </style>
 <script>{jszip}</script>
 <script>{docxjs}</script>
