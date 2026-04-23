@@ -93,6 +93,14 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         return content
     }()
 
+    static let hljsLatexScript: String = {
+        guard let url = Bundle.module.url(forResource: "hljs-latex", withExtension: "js"),
+              let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return ""
+        }
+        return content
+    }()
+
     private let containerView: NSView
     private let webView: AnyViewWebView
     private let pdfView: PDFView
@@ -1055,6 +1063,7 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
         let highlightInline = Self.highlightScript.isEmpty ? "" : "<script>\(Self.highlightScript)</script>"
+        let latexGrammar = Self.hljsLatexScript.isEmpty ? "" : "<script>\(Self.hljsLatexScript)</script>"
 
         func makeSourceHtml(statusMsg: String, isError: Bool) -> String {
             let statusColor = isError ? "#b91c1c" : "#888"
@@ -1089,6 +1098,7 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
             }
             </style>
             \(highlightInline)
+            \(latexGrammar)
             </head><body>
             \(statusHtml)
             <pre><code class="language-latex">\(escaped)</code></pre>
