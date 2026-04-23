@@ -12,6 +12,10 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
     static let subtitleExtensions: Set<String> = ["srt", "vtt", "ass", "ssa", "sub", "sbv"]
     static let videoExtensions: Set<String> = [
         "mp4", "mov", "m4v", "webm", "m2ts", "ts", "3gp",
+        "mkv", "avi", "flv", "wmv", "ogv", "rmvb", "rm", "asf", "vob", "divx", "f4v",
+    ]
+    private static let nativeVideoExtensions: Set<String> = [
+        "mp4", "mov", "m4v", "webm", "m2ts", "ts", "3gp",
     ]
     static let codeExtensions: Set<String> = [
         // Languages
@@ -95,6 +99,9 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
     private var texSourceHtml: String?
     private var texLastFind: PDFSelection?
 
+    // Video transcode state
+    private var transcodeProcess: Process?
+
     var view: NSView { containerView }
 
     private var fileExtension: String {
@@ -139,6 +146,10 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
 
     func load(filePath: String) {
         currentFilePath = filePath
+
+        // Cancel any in-progress transcode
+        transcodeProcess?.terminate()
+        transcodeProcess = nil
 
         // Reset tex state
         texShowingPdf = false
@@ -629,7 +640,114 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
 
     // MARK: - Video File
 
+    private static func ffmpegPath() -> String? {
+        if let bundled = Bundle.main.path(forResource: "ffmpeg", ofType: nil) {
+            return bundled
+        }
+        let candidates = [
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg",
+            (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/ffmpeg"),
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
     private func loadVideoFile(_ filePath: String) {
+        let ext = URL(fileURLWithPath: filePath).pathExtension.lowercased()
+        if Self.nativeVideoExtensions.contains(ext) {
+            playVideoNative(filePath)
+        } else {
+            transcodeAndPlay(filePath)
+        }
+    }
+
+    private func transcodeAndPlay(_ filePath: String) {
+        let videoURL = URL(fileURLWithPath: (filePath as NSString).standardizingPath)
+        let filename = videoURL.lastPathComponent
+        let filenameEsc = filename
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+
+        guard let ffmpeg = Self.ffmpegPath() else {
+            let html = """
+            <!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+            body{background:#000;color:#aaa;font-family:-apple-system,sans-serif;
+                 display:flex;flex-direction:column;justify-content:center;align-items:center;
+                 height:100vh;gap:12px;margin:0;}
+            code{color:#f87171;font-size:13px;}
+            </style></head><body>
+            <div>无法播放 <b>\(filenameEsc)</b></div>
+            <div>需要 ffmpeg：<code>brew install ffmpeg</code></div>
+            </body></html>
+            """
+            DispatchQueue.main.async { [weak self] in
+                self?.webView.loadHTMLString(html, baseURL: nil)
+            }
+            return
+        }
+
+        let transcodingHtml = """
+        <!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+        body{background:#000;color:#aaa;font-family:-apple-system,sans-serif;
+             display:flex;flex-direction:column;justify-content:center;align-items:center;
+             height:100vh;gap:12px;margin:0;}
+        .spinner{width:32px;height:32px;border:3px solid #333;border-top-color:#888;
+                 border-radius:50%;animation:spin 0.8s linear infinite;}
+        @keyframes spin{to{transform:rotate(360deg);}}
+        </style></head><body>
+        <div class="spinner"></div>
+        <div>正在转码 <b>\(filenameEsc)</b>…</div>
+        </body></html>
+        """
+        DispatchQueue.main.async { [weak self] in
+            self?.webView.loadHTMLString(transcodingHtml, baseURL: nil)
+        }
+
+        let outPath = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("anyview-transcode-\(videoURL.deletingPathExtension().lastPathComponent).mp4")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: ffmpeg)
+            task.arguments = ["-y", "-i", filePath,
+                              "-c:v", "copy", "-c:a", "aac", "-movflags", "faststart",
+                              outPath]
+            let errPipe = Pipe()
+            task.standardError = errPipe
+            task.standardOutput = Pipe()
+
+            self.transcodeProcess = task
+            do { try task.run() } catch {
+                DispatchQueue.main.async { self.showError("ffmpeg 启动失败: \(error)") }
+                return
+            }
+            task.waitUntilExit()
+            self.transcodeProcess = nil
+
+            if FileManager.default.fileExists(atPath: outPath) {
+                DispatchQueue.main.async { self.playVideoNative(outPath) }
+            } else {
+                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                let errMsg = String(data: errData, encoding: .utf8) ?? "未知错误"
+                let html = """
+                <!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+                body{background:#000;color:#aaa;font-family:-apple-system,sans-serif;
+                     padding:24px;margin:0;}
+                pre{color:#f87171;font-size:11px;white-space:pre-wrap;margin-top:12px;}
+                </style></head><body>
+                <div>转码失败：\(filenameEsc)</div>
+                <pre>\(errMsg.replacingOccurrences(of: "<", with: "&lt;"))</pre>
+                </body></html>
+                """
+                DispatchQueue.main.async { [weak self] in
+                    self?.webView.loadHTMLString(html, baseURL: nil)
+                }
+            }
+        }
+    }
+
+    private func playVideoNative(_ filePath: String) {
         let videoURL = URL(fileURLWithPath: (filePath as NSString).standardizingPath)
         let videoFileURI = videoURL.absoluteString
         let filename = videoURL.lastPathComponent
@@ -728,7 +846,7 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         };
         document.getElementById('v').onerror = function() {
             document.getElementById('err').textContent =
-                '无法播放此格式（\(filename)）— 仅支持 mp4 / mov / webm / m4v';
+                '无法播放 \(filename)（编解码器不支持或文件损坏）';
             document.getElementById('err').style.display = 'inline';
         };
         </script>

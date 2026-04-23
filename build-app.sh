@@ -81,6 +81,25 @@ else
     echo "Note: tectonic not found — .tex compilation will not work without it"
 fi
 
+# Bundle ffmpeg if available (for non-native video format transcoding)
+FFMPEG_BIN=""
+if [ -n "${FFMPEG_PATH:-}" ] && [ -x "$FFMPEG_PATH" ]; then
+    FFMPEG_BIN="$FFMPEG_PATH"
+elif [ -x "/opt/homebrew/bin/ffmpeg" ]; then
+    FFMPEG_BIN="/opt/homebrew/bin/ffmpeg"
+elif [ -x "/usr/local/bin/ffmpeg" ]; then
+    FFMPEG_BIN="/usr/local/bin/ffmpeg"
+elif command -v ffmpeg &>/dev/null; then
+    FFMPEG_BIN="$(command -v ffmpeg)"
+fi
+
+if [ -n "$FFMPEG_BIN" ]; then
+    cp "$FFMPEG_BIN" "$MACOS/ffmpeg"
+    echo "Bundled ffmpeg from $FFMPEG_BIN"
+else
+    echo "Note: ffmpeg not found — mkv/avi/flv/rmvb transcoding will not work without it (brew install ffmpeg)"
+fi
+
 # Bundle av CLI script
 cp "$SCRIPT_DIR/scripts/av" "$RESOURCES/av"
 chmod +x "$RESOURCES/av"

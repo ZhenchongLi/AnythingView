@@ -32,8 +32,10 @@ impl WebRenderer {
             "sty", "cls", "bib", "bbl",
             // Subtitles
             "srt", "vtt", "ass", "ssa", "sub", "sbv",
-            // Video
+            // Video (native WebKit)
             "mp4", "mov", "m4v", "webm", "m2ts", "ts", "3gp",
+            // Video (transcoded via ffmpeg)
+            "mkv", "avi", "flv", "wmv", "ogv", "rmvb", "rm", "asf", "vob", "divx", "f4v",
             // Code — languages
             "swift", "cs", "py", "js", "ts", "tsx", "jsx", "go", "rs", "rb", "java",
             "kt", "scala", "c", "h", "cpp", "hpp", "m", "mm", "lua", "r", "pl",
@@ -182,6 +184,100 @@ document.getElementById('v').onerror=function(){{
         );
 
         self.webview.load_html(&html, Some(&video_uri));
+    }
+
+    fn ffmpeg_path() -> Option<String> {
+        let candidates = [
+            "/usr/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg",
+            "/opt/homebrew/bin/ffmpeg",
+        ];
+        for c in &candidates {
+            if std::path::Path::new(c).exists() {
+                return Some(c.to_string());
+            }
+        }
+        // Check HOME/.local/bin/ffmpeg
+        if let Ok(home) = std::env::var("HOME") {
+            let p = format!("{}/.local/bin/ffmpeg", home);
+            if std::path::Path::new(&p).exists() {
+                return Some(p);
+            }
+        }
+        None
+    }
+
+    fn transcode_and_play(&self, path: &Path) {
+        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let filename_esc = html_escape::encode_text(filename).to_string();
+
+        let ffmpeg = match Self::ffmpeg_path() {
+            Some(p) => p,
+            None => {
+                let html = format!(
+                    r#"<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+body{{background:#000;color:#aaa;font-family:system-ui,sans-serif;
+     display:flex;flex-direction:column;justify-content:center;align-items:center;
+     height:100vh;gap:12px;margin:0;}}
+code{{color:#f87171;font-size:13px;}}
+</style></head><body>
+<div>无法播放 <b>{name}</b></div>
+<div>需要 ffmpeg：<code>sudo apt install ffmpeg</code></div>
+</body></html>"#,
+                    name = filename_esc
+                );
+                self.webview.load_html(&html, None);
+                return;
+            }
+        };
+
+        // Show transcoding message (may not render before blocking, but consistent with tex pattern)
+        let loading_html = format!(
+            r#"<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+body{{background:#000;color:#aaa;font-family:system-ui,sans-serif;
+     display:flex;flex-direction:column;justify-content:center;align-items:center;
+     height:100vh;gap:12px;margin:0;}}
+</style></head><body>
+<div>正在转码 <b>{name}</b>…</div>
+</body></html>"#,
+            name = filename_esc
+        );
+        self.webview.load_html(&loading_html, None);
+
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+        let out_path = std::env::temp_dir().join(format!("anyview-transcode-{}.mp4", stem));
+
+        let result = std::process::Command::new(&ffmpeg)
+            .args([
+                "-y", "-i", path.to_str().unwrap_or(""),
+                "-c:v", "copy", "-c:a", "aac", "-movflags", "faststart",
+                out_path.to_str().unwrap_or(""),
+            ])
+            .output();
+
+        match result {
+            Ok(_) if out_path.exists() => {
+                self.load_video_file(&out_path);
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let html = format!(
+                    r#"<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+body{{background:#000;color:#aaa;font-family:system-ui,sans-serif;padding:24px;margin:0;}}
+pre{{color:#f87171;font-size:11px;white-space:pre-wrap;margin-top:12px;}}
+</style></head><body>
+<div>转码失败：{name}</div>
+<pre>{err}</pre>
+</body></html>"#,
+                    name = filename_esc,
+                    err = html_escape::encode_text(&stderr)
+                );
+                self.webview.load_html(&html, None);
+            }
+            Err(e) => {
+                self.show_error(&format!("ffmpeg 启动失败: {}", e));
+            }
+        }
     }
 
     fn load_subtitle_file(&self, path: &Path) {
@@ -772,6 +868,8 @@ impl Renderer for WebRenderer {
             "tex" => self.load_tex_file(path),
             "srt" | "vtt" | "ass" | "ssa" | "sub" | "sbv" => self.load_subtitle_file(path),
             "mp4" | "mov" | "m4v" | "webm" | "m2ts" | "ts" | "3gp" => self.load_video_file(path),
+            "mkv" | "avi" | "flv" | "wmv" | "ogv" | "rmvb" | "rm" | "asf" | "vob"
+            | "divx" | "f4v" => self.transcode_and_play(path),
             _ => self.load_code_file(path),
         }
     }
