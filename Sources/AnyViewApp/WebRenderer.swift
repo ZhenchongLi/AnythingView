@@ -1,4 +1,5 @@
 import Cocoa
+import PDFKit
 import WebKit
 
 /// Renders documents using WKWebView.
@@ -69,7 +70,10 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         return content
     }()
 
+    private let containerView: NSView
     private let webView: WKWebView
+    private let pdfView: PDFView
+    private let texToggleBtn: NSButton
     private let lock = NSLock()
     private var _tempDir: String?
     private var tempDir: String? {
@@ -79,7 +83,13 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
     private var currentFilePath: String?
     private var zoomLevel: CGFloat = 1.0
 
-    var view: NSView { webView }
+    // Tex-specific state
+    private var texShowingPdf = false
+    private var texPdfPath: String?
+    private var texSourceHtml: String?
+    private var texLastFind: PDFSelection?
+
+    var view: NSView { containerView }
 
     private var fileExtension: String {
         guard let fp = currentFilePath else { return "" }
@@ -87,11 +97,32 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
     }
 
     override init() {
+        containerView = NSView(frame: .zero)
+
         let config = WKWebViewConfiguration()
         webView = WKWebView(frame: .zero, configuration: config)
         webView.autoresizingMask = [.width, .height]
+
+        pdfView = PDFView(frame: .zero)
+        pdfView.autoresizingMask = [.width, .height]
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.isHidden = true
+
+        texToggleBtn = NSButton(frame: NSRect(x: 0, y: 0, width: 72, height: 26))
+        texToggleBtn.bezelStyle = .rounded
+        texToggleBtn.font = NSFont.systemFont(ofSize: 12)
+        texToggleBtn.isHidden = true
+        texToggleBtn.autoresizingMask = [.minXMargin, .minYMargin]
+
+        containerView.addSubview(webView)
+        containerView.addSubview(pdfView)
+        containerView.addSubview(texToggleBtn)
+
         super.init()
         webView.navigationDelegate = self
+        texToggleBtn.target = self
+        texToggleBtn.action = #selector(toggleTexView)
     }
 
     deinit {
@@ -102,6 +133,16 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
 
     func load(filePath: String) {
         currentFilePath = filePath
+
+        // Reset tex state
+        texShowingPdf = false
+        texPdfPath = nil
+        texSourceHtml = nil
+        texLastFind = nil
+        pdfView.document = nil
+        pdfView.isHidden = true
+        webView.isHidden = false
+        texToggleBtn.isHidden = true
 
         if let dir = tempDir {
             ZipExtractor.cleanup(tempDir: dir)
@@ -150,35 +191,84 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
 
     func setZoom(_ level: CGFloat) {
         zoomLevel = level
-        webView.pageZoom = level
-        if Self.htmlExtensions.contains(fileExtension) {
-            webView.evaluateJavaScript(
-                "window.__vaSetZoom && window.__vaSetZoom(\(level))",
-                completionHandler: nil
-            )
+        if texShowingPdf {
+            pdfView.scaleFactor = level
+        } else {
+            webView.pageZoom = level
+            if Self.htmlExtensions.contains(fileExtension) {
+                webView.evaluateJavaScript(
+                    "window.__vaSetZoom && window.__vaSetZoom(\(level))",
+                    completionHandler: nil
+                )
+            }
         }
     }
 
     // MARK: - Find
 
     func performFind(query: String, forward: Bool, completion: @escaping (Bool) -> Void) {
-        func doFind() {
-            let config = WKFindConfiguration()
-            config.backwards = !forward
-            config.wraps = true
-            config.caseSensitive = false
-            self.webView.find(query, configuration: config) { result in
-                completion(result.matchFound)
+        if texShowingPdf, let doc = pdfView.document {
+            var options: NSString.CompareOptions = [.caseInsensitive]
+            if !forward { options.insert(.backwards) }
+            let match = doc.findString(query, fromSelection: texLastFind, withOptions: options)
+                ?? doc.findString(query, fromSelection: nil, withOptions: options)
+            if let match {
+                texLastFind = match
+                pdfView.setCurrentSelection(match, animate: true)
+                pdfView.scrollSelectionToVisible(nil)
+                completion(true)
+            } else {
+                completion(false)
             }
+            return
         }
-        // PDF iframes aren't searchable — switch to source view first if tex is showing PDF
-        if Self.texExtensions.contains(fileExtension) {
-            webView.evaluateJavaScript(
-                "if(typeof showing!=='undefined'&&showing==='preview'){toggle();}"
-            ) { _, _ in doFind() }
-        } else {
-            doFind()
+        let config = WKFindConfiguration()
+        config.backwards = !forward
+        config.wraps = true
+        config.caseSensitive = false
+        webView.find(query, configuration: config) { result in
+            completion(result.matchFound)
         }
+    }
+
+    // MARK: - Tex toggle
+
+    @objc private func toggleTexView() {
+        if texShowingPdf { showTexSource() } else { showTexPdf() }
+    }
+
+    private func showTexPdf() {
+        guard let path = texPdfPath,
+              let doc = PDFDocument(url: URL(fileURLWithPath: path)) else { return }
+        texShowingPdf = true
+        texLastFind = nil
+        pdfView.document = doc
+        webView.isHidden = true
+        pdfView.isHidden = false
+        texToggleBtn.title = "</>"
+        positionTexToggleBtn()
+    }
+
+    private func showTexSource() {
+        guard let html = texSourceHtml else { return }
+        texShowingPdf = false
+        pdfView.isHidden = true
+        webView.isHidden = false
+        texToggleBtn.title = "PDF"
+        positionTexToggleBtn()
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    private func positionTexToggleBtn() {
+        let margin: CGFloat = 12
+        let w = texToggleBtn.frame.width
+        let h = texToggleBtn.frame.height
+        texToggleBtn.frame = NSRect(
+            x: containerView.bounds.width - w - margin,
+            y: containerView.bounds.height - h - margin,
+            width: w, height: h
+        )
+        texToggleBtn.isHidden = false
     }
 
     // MARK: - WKNavigationDelegate
@@ -641,75 +731,9 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
 
             if FileManager.default.fileExists(atPath: pdfPath) {
                 self.tempDir = tmpDir
-                let pdfURL = URL(fileURLWithPath: pdfPath)
-                let pdfName = pdfURL.lastPathComponent
-                let html = """
-                <!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="color-scheme" content="light dark">
-                <style>
-                *{margin:0;padding:0;box-sizing:border-box;}
-                body{background:#fff;}
-                iframe{width:100%;height:100vh;border:none;display:block;}
-                #source{display:none;margin:0;padding:20px 24px;white-space:pre-wrap;word-wrap:break-word;
-                        font-family:"SF Mono",Menlo,monospace;font-size:13px;line-height:1.5;tab-size:4;
-                        color:#1a1a1a;background:#f8f9fa;min-height:100vh;}
-                .toggle-btn{position:fixed;top:12px;right:16px;z-index:9999;
-                            width:32px;height:32px;border:none;border-radius:50%;
-                            background:rgba(0,0,0,0.06);color:#555;
-                            font-size:14px;font-family:-apple-system,sans-serif;font-weight:500;
-                            cursor:pointer;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-                            display:flex;align-items:center;justify-content:center;
-                            transition:all 0.2s;line-height:1;}
-                .toggle-btn:hover{background:rgba(0,0,0,0.12);transform:scale(1.08);}
-                .hljs{display:block;overflow-x:auto;padding:0;color:#333;background:transparent;}
-                .hljs-comment,.hljs-quote{color:#998;font-style:italic;}
-                .hljs-keyword,.hljs-selector-tag,.hljs-subst{color:#333;font-weight:bold;}
-                .hljs-number,.hljs-literal,.hljs-variable,.hljs-template-variable,.hljs-tag .hljs-attr{color:#008080;}
-                .hljs-string,.hljs-doctag{color:#d14;}
-                .hljs-title,.hljs-section,.hljs-selector-id{color:#900;font-weight:bold;}
-                .hljs-built_in,.hljs-builtin-name{color:#0086b3;}
-                .hljs-meta{color:#999;font-weight:bold;}
-                @media(prefers-color-scheme:dark){
-                    body{background:#1a1a1a;}
-                    #source{color:#d4d4d4;background:#1e1e1e;}
-                    .toggle-btn{background:rgba(255,255,255,0.1);color:#aaa;}
-                    .toggle-btn:hover{background:rgba(255,255,255,0.18);}
-                    .hljs{color:#abb2bf;}
-                    .hljs-comment,.hljs-quote{color:#5c6370;font-style:italic;}
-                    .hljs-keyword,.hljs-formula{color:#c678dd;}
-                    .hljs-string,.hljs-regexp,.hljs-addition,.hljs-attribute{color:#98c379;}
-                    .hljs-built_in{color:#e6c07b;}
-                    .hljs-number,.hljs-type,.hljs-selector-class,.hljs-selector-pseudo{color:#d19a66;}
-                }
-                </style>
-                \(highlightInline)
-                </head><body>
-                <button class="toggle-btn" onclick="toggle()">&lt;/&gt;</button>
-                <iframe id="preview" src="\(pdfName)"></iframe>
-                <pre id="source"><code class="language-latex">\(escaped)</code></pre>
-                <script>
-                var showing='preview';
-                function toggle(){
-                    var p=document.getElementById('preview');
-                    var s=document.getElementById('source');
-                    var btn=document.querySelector('.toggle-btn');
-                    if(showing==='preview'){
-                        p.style.display='none';s.style.display='block';
-                        btn.innerHTML='\u{1f441}';showing='source';
-                        if(window.hljs){hljs.highlightAll();}
-                    }else{
-                        s.style.display='none';p.style.display='block';
-                        btn.innerHTML='&lt;/&gt;';showing='preview';
-                    }
-                }
-                </script>
-                </body></html>
-                """
-                let tmpDirURL = URL(fileURLWithPath: tmpDir)
-                let htmlPath = (tmpDir as NSString).appendingPathComponent("index.html")
-                try? html.write(toFile: htmlPath, atomically: true, encoding: .utf8)
-                DispatchQueue.main.async {
-                    self.webView.loadFileURL(URL(fileURLWithPath: htmlPath), allowingReadAccessTo: tmpDirURL)
-                }
+                self.texPdfPath = pdfPath
+                self.texSourceHtml = makeSourceHtml(statusMsg: "", isError: false)
+                DispatchQueue.main.async { self.showTexPdf() }
             } else {
                 let errData = pipe.fileHandleForReading.readDataToEndOfFile()
                 let errMsg = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Compilation failed"
