@@ -21,6 +21,30 @@ protocol SupportsFind: AnyObject {
     func performFind(query: String, forward: Bool, completion: @escaping (Bool) -> Void)
 }
 
+/// Errors surfaced by fidelity (LibreOffice → PDF) conversion.
+enum FidelityError: LocalizedError {
+    case sofficeNotFound
+    case noSourceDocx
+    case conversionFailed(String)
+    case unsupportedExtension
+
+    var errorDescription: String? {
+        switch self {
+        case .sofficeNotFound: return "LibreOffice (soffice) not found."
+        case .noSourceDocx: return "No source.docx found inside the package."
+        case .conversionFailed(let msg): return "LibreOffice conversion failed: \(msg)"
+        case .unsupportedExtension: return "Fidelity mode does not support this file type."
+        }
+    }
+}
+
+/// Renderers that can swap their normal display for a high-fidelity
+/// LibreOffice → PDF render of the same file.
+protocol SupportsFidelity: AnyObject {
+    var canEnterFidelityMode: Bool { get }
+    func setFidelityMode(_ on: Bool, completion: @escaping (Result<Void, FidelityError>) -> Void)
+}
+
 /// Returns the appropriate renderer for a file extension.
 enum RendererFactory {
     static func renderer(for extension: String) -> ViewerRenderer {

@@ -5,6 +5,7 @@ private extension NSToolbarItem.Identifier {
     static let zoomOut = NSToolbarItem.Identifier("zoomOut")
     static let zoomReset = NSToolbarItem.Identifier("zoomReset")
     static let zoomIn = NSToolbarItem.Identifier("zoomIn")
+    static let fidelityToggle = NSToolbarItem.Identifier("fidelityToggle")
 }
 
 class ViewerWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate {
@@ -30,6 +31,9 @@ class ViewerWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate {
     private var watcherSource: DispatchSourceFileSystemObject?
     private var reloadDebounceItem: DispatchWorkItem?
     private let reloadQueue = DispatchQueue(label: "com.anyview.reload", qos: .userInitiated)
+
+    private weak var fidelityToolbarItem: NSToolbarItem?
+    private var fidelityOn: Bool = false
 
     private var fileExtension: String {
         URL(fileURLWithPath: filePath).pathExtension.lowercased()
@@ -149,6 +153,97 @@ class ViewerWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.reloadDebounceInterval, execute: item)
     }
 
+    // MARK: - Fidelity Mode
+
+    @objc func toggleFidelity(_ sender: Any?) {
+        guard let renderer = renderer as? SupportsFidelity else { return }
+        let newState = !fidelityOn
+        if newState && LibreOfficeCLI.findSoffice() == nil {
+            promptInstallLibreOffice { [weak self] proceed in
+                guard let self else { return }
+                if proceed {
+                    self.beginInstallLibreOffice()
+                }
+            }
+            return
+        }
+        renderer.setFidelityMode(newState) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success:
+                    self.fidelityOn = newState
+                    self.updateFidelityToolbarIcon()
+                case .failure(let err):
+                    self.fidelityOn = false
+                    self.updateFidelityToolbarIcon()
+                    self.showFidelityError(err)
+                }
+            }
+        }
+    }
+
+    private func updateFidelityToolbarIcon() {
+        let symbol = fidelityOn ? "doc.richtext.fill" : "doc.richtext"
+        fidelityToolbarItem?.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: "Fidelity Mode"
+        )
+    }
+
+    private func promptInstallLibreOffice(completion: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "需要 LibreOffice 才能开启保真模式"
+        alert.informativeText = "保真模式用 LibreOffice 把文档渲染成 PDF（公文红头、复杂表格、字段都对得上）。\n首次使用需要下载并安装到 AnyView 应用数据目录，约 300 MB。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "下载并安装")
+        alert.addButton(withTitle: "取消")
+        if let win = window {
+            alert.beginSheetModal(for: win) { resp in
+                completion(resp == .alertFirstButtonReturn)
+            }
+        } else {
+            completion(alert.runModal() == .alertFirstButtonReturn)
+        }
+    }
+
+    private func beginInstallLibreOffice() {
+        let installer = LibreOfficeInstaller(attachWindow: window)
+        installer.runWithSheet { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                // Re-trigger the toggle now that soffice exists.
+                self.toggleFidelity(nil)
+            case .failure(let err):
+                if case .canceled = err { return }
+                let alert = NSAlert()
+                alert.messageText = "LibreOffice 安装失败"
+                alert.informativeText = err.errorDescription ?? "未知错误"
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "好")
+                if let win = self.window {
+                    alert.beginSheetModal(for: win, completionHandler: nil)
+                } else {
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
+    private func showFidelityError(_ err: FidelityError) {
+        let alert = NSAlert()
+        alert.messageText = "保真模式出错"
+        alert.informativeText = err.errorDescription ?? "未知错误"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "好")
+        if let win = window {
+            alert.beginSheetModal(for: win, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
+    }
+
     // MARK: - Appearance Toggle
 
     @objc private func toggleAppearance(_ sender: Any?) {
@@ -179,12 +274,19 @@ class ViewerWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate {
 
     // MARK: - NSToolbarDelegate
 
+    private var fidelityCapable: Bool {
+        LibreOfficeFidelity.supportedExtensions.contains(fileExtension)
+    }
+
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.zoomOut, .zoomReset, .zoomIn, .flexibleSpace, .appearanceToggle]
+        var ids: [NSToolbarItem.Identifier] = [.zoomOut, .zoomReset, .zoomIn, .flexibleSpace]
+        if fidelityCapable { ids.append(.fidelityToggle) }
+        ids.append(.appearanceToggle)
+        return ids
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.zoomOut, .zoomReset, .zoomIn, .flexibleSpace, .appearanceToggle]
+        [.zoomOut, .zoomReset, .zoomIn, .flexibleSpace, .fidelityToggle, .appearanceToggle]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -230,6 +332,19 @@ class ViewerWindowController: NSObject, NSWindowDelegate, NSToolbarDelegate {
             item.view = button
             item.label = "Zoom"
             item.toolTip = "Reset Zoom (⌘0)"
+            return item
+        }
+        if itemIdentifier == .fidelityToggle {
+            let item = NSToolbarItem(itemIdentifier: .fidelityToggle)
+            item.image = NSImage(
+                systemSymbolName: "doc.richtext",
+                accessibilityDescription: "Fidelity Mode"
+            )
+            item.label = "保真"
+            item.toolTip = "切换到 LibreOffice 高保真渲染"
+            item.target = self
+            item.action = #selector(toggleFidelity(_:))
+            self.fidelityToolbarItem = item
             return item
         }
         return nil

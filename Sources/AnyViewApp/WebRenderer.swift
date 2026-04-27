@@ -17,8 +17,9 @@ private class AnyViewWebView: WKWebView {
 
 /// Renders documents using WKWebView.
 /// Handles docx, docmod, doct, html, markdown, and code files.
-class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate {
+class WebRenderer: NSObject, ViewerRenderer, SupportsFind, SupportsFidelity, WKNavigationDelegate {
     static let docExtensions: Set<String> = ["docmod", "doct", "docx"]
+    static let xlsxExtensions: Set<String> = ["xlsx", "xls"]
     static let htmlExtensions: Set<String> = ["html", "htm"]
     static let markdownExtensions: Set<String> = ["md", "markdown"]
     static let texExtensions: Set<String> = ["tex"]
@@ -54,6 +55,7 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         "sty", "cls", "bib", "bbl",
     ]
     static let supportedExtensions: Set<String> = docExtensions
+        .union(xlsxExtensions)
         .union(htmlExtensions)
         .union(markdownExtensions)
         .union(texExtensions)
@@ -79,6 +81,14 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
 
     static let docxPreviewScript: String = {
         guard let url = Bundle.module.url(forResource: "docx-preview.min", withExtension: "js"),
+              let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return ""
+        }
+        return content
+    }()
+
+    static let xlsxScript: String = {
+        guard let url = Bundle.module.url(forResource: "xlsx.full.min", withExtension: "js"),
               let content = try? String(contentsOf: url, encoding: .utf8) else {
             return ""
         }
@@ -120,6 +130,14 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
     private var texSourceHtml: String?
     private var texLastFind: PDFSelection?
 
+    // Fidelity (LibreOffice → PDF) state
+    private(set) var fidelityModePreferred = false
+    private var fidelityShowingPdf = false
+    private var fidelityLastFind: PDFSelection?
+    private var fidelityConversionID: UUID?
+    private let fidelityProgress: NSProgressIndicator
+    private let fidelityStatus: NSTextField
+
     // Video transcode state
     private var transcodeProcess: Process?
 
@@ -149,9 +167,30 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         texToggleBtn.isHidden = true
         texToggleBtn.autoresizingMask = [.minXMargin, .minYMargin]
 
+        fidelityProgress = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
+        fidelityProgress.style = .spinning
+        fidelityProgress.controlSize = .small
+        fidelityProgress.isIndeterminate = true
+        fidelityProgress.isDisplayedWhenStopped = false
+        fidelityProgress.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+
+        fidelityStatus = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 18))
+        fidelityStatus.isEditable = false
+        fidelityStatus.isSelectable = false
+        fidelityStatus.isBezeled = false
+        fidelityStatus.drawsBackground = false
+        fidelityStatus.alignment = .center
+        fidelityStatus.font = NSFont.systemFont(ofSize: 12)
+        fidelityStatus.textColor = .secondaryLabelColor
+        fidelityStatus.stringValue = ""
+        fidelityStatus.isHidden = true
+        fidelityStatus.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+
         containerView.addSubview(webView)
         containerView.addSubview(pdfView)
         containerView.addSubview(texToggleBtn)
+        containerView.addSubview(fidelityProgress)
+        containerView.addSubview(fidelityStatus)
 
         super.init()
         webView.navigationDelegate = self
@@ -181,6 +220,12 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         pdfView.isHidden = true
         webView.isHidden = false
         texToggleBtn.isHidden = true
+
+        // Reset fidelity rendering state (preference is sticky across reloads)
+        fidelityShowingPdf = false
+        fidelityLastFind = nil
+        fidelityConversionID = nil
+        hideFidelityOverlay()
 
         if let dir = tempDir {
             ZipExtractor.cleanup(tempDir: dir)
@@ -215,6 +260,12 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         }
         if ext == "docx" {
             loadDocxContent(filePath)
+            DispatchQueue.main.async { [weak self] in self?.applyFidelityIfPreferred() }
+            return
+        }
+        if Self.xlsxExtensions.contains(ext) {
+            loadXlsxContent(filePath)
+            DispatchQueue.main.async { [weak self] in self?.applyFidelityIfPreferred() }
             return
         }
 
@@ -233,11 +284,21 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
         } else {
             loadDocmodContent(filePath, extractedDir: extractedDir)
         }
+        DispatchQueue.main.async { [weak self] in self?.applyFidelityIfPreferred() }
+    }
+
+    /// Re-route to fidelity (PDF) view if user has it pinned. Called by load paths after
+    /// they've kicked off the normal HTML render so the docx-preview stays underneath
+    /// while LibreOffice does its work.
+    private func applyFidelityIfPreferred() {
+        guard fidelityModePreferred,
+              LibreOfficeFidelity.supportedExtensions.contains(fileExtension) else { return }
+        beginFidelityConversion()
     }
 
     func setZoom(_ level: CGFloat) {
         zoomLevel = level
-        if texShowingPdf {
+        if texShowingPdf || fidelityShowingPdf {
             pdfView.scaleFactor = level
         } else {
             webView.pageZoom = level
@@ -253,13 +314,14 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
     // MARK: - Find
 
     func performFind(query: String, forward: Bool, completion: @escaping (Bool) -> Void) {
-        if texShowingPdf, let doc = pdfView.document {
+        if (texShowingPdf || fidelityShowingPdf), let doc = pdfView.document {
             var options: NSString.CompareOptions = [.caseInsensitive]
             if !forward { options.insert(.backwards) }
-            let match = doc.findString(query, fromSelection: texLastFind, withOptions: options)
+            let lastFind = texShowingPdf ? texLastFind : fidelityLastFind
+            let match = doc.findString(query, fromSelection: lastFind, withOptions: options)
                 ?? doc.findString(query, fromSelection: nil, withOptions: options)
             if let match {
-                texLastFind = match
+                if texShowingPdf { texLastFind = match } else { fidelityLastFind = match }
                 pdfView.setCurrentSelection(match, animate: true)
                 pdfView.scrollSelectionToVisible(nil)
                 completion(true)
@@ -315,6 +377,134 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
             width: w, height: h
         )
         texToggleBtn.isHidden = false
+    }
+
+    // MARK: - Fidelity (LibreOffice → PDF)
+
+    /// Whether the current file can be re-rendered in fidelity (LibreOffice) mode.
+    var canEnterFidelityMode: Bool {
+        LibreOfficeFidelity.supportedExtensions.contains(fileExtension)
+    }
+
+    /// Toggle fidelity mode. Off → kicks the normal HTML render path back in.
+    /// On → runs LibreOffice in the background and swaps to PDFView when ready.
+    /// `completion` reports the eventual success/failure of *entering* fidelity
+    /// (off-toggles complete synchronously with success).
+    func setFidelityMode(_ on: Bool, completion: @escaping (Result<Void, FidelityError>) -> Void) {
+        guard LibreOfficeFidelity.supportedExtensions.contains(fileExtension) else {
+            completion(.failure(.unsupportedExtension))
+            return
+        }
+        fidelityModePreferred = on
+        if on {
+            beginFidelityConversion(completion: completion)
+        } else {
+            fidelityShowingPdf = false
+            fidelityLastFind = nil
+            fidelityConversionID = nil
+            pdfView.document = nil
+            pdfView.isHidden = true
+            webView.isHidden = false
+            hideFidelityOverlay()
+            if let fp = currentFilePath {
+                load(filePath: fp)
+            }
+            completion(.success(()))
+        }
+    }
+
+    private func beginFidelityConversion(completion: ((Result<Void, FidelityError>) -> Void)? = nil) {
+        guard let filePath = currentFilePath else {
+            completion?(.failure(.unsupportedExtension))
+            return
+        }
+        guard LibreOfficeCLI.findSoffice() != nil else {
+            fidelityModePreferred = false
+            completion?(.failure(.sofficeNotFound))
+            return
+        }
+
+        if let cached = FidelityCache.cachedPDFPath(for: filePath) {
+            showFidelityPdf(at: cached)
+            completion?(.success(()))
+            return
+        }
+
+        let id = UUID()
+        fidelityConversionID = id
+        showFidelityOverlay("生成保真预览…")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result: Result<String, FidelityError>
+            do {
+                let pdfPath = try LibreOfficeFidelity.preparePDF(for: filePath)
+                result = .success(pdfPath)
+            } catch let err as FidelityError {
+                result = .failure(err)
+            } catch {
+                result = .failure(.conversionFailed(error.localizedDescription))
+            }
+
+            DispatchQueue.main.async {
+                guard let self, self.fidelityConversionID == id else { return }
+                self.fidelityConversionID = nil
+                self.hideFidelityOverlay()
+                switch result {
+                case .success(let pdf):
+                    self.showFidelityPdf(at: pdf)
+                    completion?(.success(()))
+                case .failure(let err):
+                    self.fidelityModePreferred = false
+                    completion?(.failure(err))
+                }
+            }
+        }
+    }
+
+    private func showFidelityPdf(at path: String) {
+        guard let doc = PDFDocument(url: URL(fileURLWithPath: path)) else {
+            fidelityModePreferred = false
+            return
+        }
+        fidelityShowingPdf = true
+        fidelityLastFind = nil
+        pdfView.document = doc
+        pdfView.scaleFactor = zoomLevel
+        webView.isHidden = true
+        pdfView.isHidden = false
+        hideFidelityOverlay()
+    }
+
+    private func showFidelityOverlay(_ message: String) {
+        fidelityStatus.stringValue = message
+        fidelityStatus.isHidden = false
+        fidelityProgress.startAnimation(nil)
+        positionFidelityOverlay()
+    }
+
+    private func hideFidelityOverlay() {
+        fidelityProgress.stopAnimation(nil)
+        fidelityStatus.isHidden = true
+    }
+
+    private func positionFidelityOverlay() {
+        let bounds = containerView.bounds
+        let spinSize: CGFloat = 24
+        let labelWidth: CGFloat = 200
+        let labelHeight: CGFloat = 18
+        let gap: CGFloat = 8
+        let totalHeight = spinSize + gap + labelHeight
+        let originY = (bounds.height - totalHeight) / 2
+        fidelityProgress.frame = NSRect(
+            x: (bounds.width - spinSize) / 2,
+            y: originY + labelHeight + gap,
+            width: spinSize, height: spinSize
+        )
+        fidelityStatus.frame = NSRect(
+            x: (bounds.width - labelWidth) / 2,
+            y: originY,
+            width: labelWidth, height: labelHeight
+        )
     }
 
     // MARK: - WKNavigationDelegate
@@ -1376,6 +1566,141 @@ class WebRenderer: NSObject, ViewerRenderer, SupportsFind, WKNavigationDelegate 
                     status.textContent = '渲染失败: ' + (e2 && e2.message ? e2.message : e2);
                 }
             }
+        })();
+        </script>
+        </body>
+        </html>
+        """
+
+        DispatchQueue.main.async { [weak self] in
+            self?.webView.loadHTMLString(html, baseURL: nil)
+        }
+    }
+
+    private func loadXlsxContent(_ filePath: String) {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else {
+            showError("Failed to read spreadsheet")
+            return
+        }
+        let base64 = data.base64EncodedString()
+
+        let html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="UTF-8">
+        <meta name="color-scheme" content="light dark">
+        <style>
+            * { box-sizing: border-box; }
+            html, body { margin: 0; padding: 0; height: 100vh; overflow: hidden;
+                         font-family: -apple-system, "PingFang SC", sans-serif;
+                         background: #f9fafb; color: #1a1a1a; }
+            body { display: flex; flex-direction: column; }
+            @media (prefers-color-scheme: dark) { body { background: #111827; color: #e5e7eb; } }
+            #tabs { flex: 0 0 auto; padding: 6px 8px 0;
+                    background: rgba(0,0,0,0.04);
+                    border-bottom: 1px solid rgba(0,0,0,0.1);
+                    display: flex; gap: 2px; overflow-x: auto; }
+            @media (prefers-color-scheme: dark) {
+                #tabs { background: rgba(255,255,255,0.04); border-bottom-color: rgba(255,255,255,0.1); }
+            }
+            .tab { padding: 6px 14px; border: none; background: transparent;
+                   cursor: pointer; font: inherit; font-size: 12px; color: inherit;
+                   border-radius: 4px 4px 0 0; white-space: nowrap; }
+            .tab:hover { background: rgba(0,0,0,0.06); }
+            .tab.active { background: #fff; box-shadow: 0 -1px 0 rgba(0,0,0,0.05); font-weight: 500; }
+            @media (prefers-color-scheme: dark) { .tab.active { background: #1f2937; } }
+            #scroll { flex: 1; overflow: auto; padding: 12px; }
+            #content { display: inline-block; min-width: 100%; }
+            #empty { padding: 24px; color: #888; font-size: 13px; }
+            table { border-collapse: collapse; background: #fff;
+                    box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+            @media (prefers-color-scheme: dark) { table { background: #1f2937; } }
+            td, th { border: 1px solid #e5e7eb; padding: 4px 8px;
+                     min-width: 60px; max-width: 480px;
+                     vertical-align: top; white-space: pre-wrap; word-break: break-word;
+                     font-size: 13px; }
+            @media (prefers-color-scheme: dark) { td, th { border-color: #374151; } }
+            thead tr { background: #f3f4f6; }
+            @media (prefers-color-scheme: dark) { thead tr { background: #0f172a; } }
+            thead th { position: sticky; top: 0; z-index: 1; font-weight: 600; }
+            #status { position: fixed; top: 8px; right: 12px; padding: 4px 10px;
+                      background: rgba(0,0,0,0.7); color: #fff; border-radius: 4px;
+                      font-size: 11px; backdrop-filter: blur(8px); pointer-events: none; }
+            #status.gone { display: none; }
+            #status.error { background: #b91c1c; }
+        </style>
+        <script>\(Self.xlsxScript)</script>
+        </head>
+        <body>
+        <div id="tabs"></div>
+        <div id="scroll"><div id="content"><div id="empty">正在解析…</div></div></div>
+        <div id="status">解析中…</div>
+        <script>
+        (function() {
+            const tabsEl = document.getElementById('tabs');
+            const contentEl = document.getElementById('content');
+            const statusEl = document.getElementById('status');
+            const b64 = "\(base64)";
+            let wb;
+            try {
+                const bin = atob(b64);
+                const buf = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+                wb = XLSX.read(buf, { type: 'array', cellDates: true });
+            } catch (e) {
+                contentEl.innerHTML = '';
+                statusEl.className = 'error';
+                statusEl.textContent = '解析失败: ' + (e && e.message ? e.message : e);
+                return;
+            }
+            const sheets = wb.SheetNames;
+            if (!sheets.length) {
+                contentEl.innerHTML = '<div id="empty">空文件</div>';
+                statusEl.classList.add('gone');
+                return;
+            }
+            function renderSheet(idx) {
+                const ws = wb.Sheets[sheets[idx]];
+                const html = XLSX.utils.sheet_to_html(ws, { editable: false, header: '', footer: '' });
+                contentEl.innerHTML = html;
+                const table = contentEl.querySelector('table');
+                if (table) {
+                    const firstRow = table.querySelector('tr');
+                    if (firstRow) {
+                        const thead = document.createElement('thead');
+                        thead.appendChild(firstRow);
+                        table.insertBefore(thead, table.firstChild);
+                        firstRow.querySelectorAll('td').forEach(function(td) {
+                            const th = document.createElement('th');
+                            for (const a of td.attributes) th.setAttribute(a.name, a.value);
+                            th.innerHTML = td.innerHTML;
+                            td.replaceWith(th);
+                        });
+                    }
+                }
+                tabsEl.querySelectorAll('.tab').forEach(function(t) {
+                    t.classList.toggle('active', t.dataset.idx === String(idx));
+                });
+                const ref = ws['!ref'] || '-';
+                statusEl.textContent = sheets[idx] + ' · ' + ref;
+                statusEl.classList.remove('gone');
+                clearTimeout(window.__hideStatus);
+                window.__hideStatus = setTimeout(function(){ statusEl.classList.add('gone'); }, 1800);
+            }
+            if (sheets.length > 1) {
+                sheets.forEach(function(name, i) {
+                    const btn = document.createElement('button');
+                    btn.className = 'tab' + (i === 0 ? ' active' : '');
+                    btn.textContent = name;
+                    btn.dataset.idx = i;
+                    btn.addEventListener('click', function(){ renderSheet(i); });
+                    tabsEl.appendChild(btn);
+                });
+            } else {
+                tabsEl.style.display = 'none';
+            }
+            renderSheet(0);
         })();
         </script>
         </body>
